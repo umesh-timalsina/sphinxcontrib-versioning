@@ -97,7 +97,7 @@ def gather_git_info(root, conf_rel_paths, whitelist_branches, whitelist_tags):
     return whitelisted_remotes
 
 
-def pre_build(local_root, versions):
+def pre_build(local_root, versions, command='python setup.py --name'):
     """Build docs for all versions to determine root directory and master_doc names.
 
     Need to build docs to (a) avoid filename collision with files from root_ref and branch/tag names and (b) determine
@@ -126,6 +126,11 @@ def pre_build(local_root, versions):
     with TempDir() as temp_dir:
         log.debug('Building root (before setting root_dirs) in temporary directory: %s', temp_dir)
         source = os.path.dirname(os.path.join(exported_root, remote['sha'], remote['conf_rel_path']))
+        op = os.system('cd {} && python setup.py --name'.format(exported_root + '/' + remote['sha']))
+        log.error('Python Command OP: {0}, {1}'.format(op, exported_root))
+        if op != 0:
+            while True:
+                pass
         build(source, temp_dir, versions, remote['name'], True)
         existing = os.listdir(temp_dir)
 
@@ -139,9 +144,16 @@ def pre_build(local_root, versions):
         existing.append(root_dir)
 
     # Get found_docs and master_doc values for all versions.
+    root_ref = versions[Config.from_context().root_ref]
+
     for remote in list(versions.remotes):
         log.debug('Partially running sphinx-build to read configuration for: %s', remote['name'])
         source = os.path.dirname(os.path.join(exported_root, remote['sha'], remote['conf_rel_path']))
+        _checkout_files(exported_root, root_ref, remote)
+        op = os.system('cd {} && python setup.py --name && '.format(exported_root + '/' + remote['sha']))
+        if op != 0:
+            while True:
+                pass
         try:
             config = read_config(source, remote['name'])
         except HandledError:
@@ -154,12 +166,41 @@ def pre_build(local_root, versions):
     return exported_root
 
 
+def _checkout_files(exported_root, root_ref, remote):
+    import os
+    import glob
+    import shutil
+    main_dir = os.path.join(exported_root, root_ref['sha'])
+    source = os.path.join(exported_root, remote['sha'])
+    files = ['docs/conf.py',
+             'docs/index.rst',
+             'docs/indexlatex.rst',
+             'docs/example_system.rst',
+             'docs/tutorials/tutorials.rst',
+             'setup.py'
+             ]
+
+    for file in files:
+        if file.endswith('latex.rst') or  file.endswith('example_system.rst'):
+            continue
+        os.remove(os.path.join(source, file))
+        shutil.copyfile(os.path.join(main_dir, file), os.path.join(source, file))
+
+    tutorials_path = os.path.dirname(os.path.join(source, 'docs/tutorials'))
+
+    for file in glob.glob(tutorials_path + '/tutorial_*.rst'):
+        print(file)
+        os.remove(file)
+    return
+
+
 def build_all(exported_root, destination, versions):
     """Build all versions.
 
     :param str exported_root: Tempdir path with exported commits as subdirectories.
     :param str destination: Destination directory to copy/overwrite built docs to. Does not delete old files.
     :param sphinxcontrib.versioning.versions.Versions versions: Versions class instance.
+    :param str prebuild_command: Run this before running the build for a particular remote
     """
     log = logging.getLogger(__name__)
 
